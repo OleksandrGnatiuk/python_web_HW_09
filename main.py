@@ -1,16 +1,18 @@
 import json
-
+import re
+import asyncio
 import requests
 from bs4 import BeautifulSoup
 
 BASE_URL = 'https://quotes.toscrape.com'
 
 author_list = []
-unique_author = set()
+unique_author = set()   # допоміжний сет для збирання тільки "унікальних" авторів
 quote_list = []
+page_list = []  # для формування списку url, на яких будемо парсити
 
 
-def get_about_author(about_link):
+def get_info_about_author(about_link):
     path = BASE_URL + about_link
     response1 = requests.get(path)
     soup1 = BeautifulSoup(response1.text, 'lxml')
@@ -36,7 +38,7 @@ def one_page_parse(url):
         # формуємо список тільки з "унікальних" авторів:
         if author not in unique_author:
             about_link = author_details[i]['href']
-            aut['born_date'], aut['born_location'], aut['description'] = get_about_author(about_link)
+            aut['born_date'], aut['born_location'], aut['description'] = get_info_about_author(about_link)
             author_list.append(aut)
             unique_author.add(author)
 
@@ -51,20 +53,25 @@ def one_page_parse(url):
         quote_list.append(quote)
 
 
-def main(url):
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, 'lxml')
-    one_page_parse(url)
-    pages = soup.select('li[class=next] a')
-    
-    # якщо є посилання "next" на наступну сторінку, то рекурсивно парсимо наступну сторінку:
-    if pages:
-        next_page = BASE_URL + pages[0]['href']
-        return main(next_page)
+async def main():
+    i = 1
+    while True:
+        # формуємо список сторінок на яких будемо парсити:
+        number_page_link = f'https://quotes.toscrape.com/page/{i}'
+        response = requests.get(number_page_link)
+
+        if not re.findall('No quotes found!', response.text):
+            page_list.append(number_page_link)
+            i += 1
+        else:
+            break
+    # асинхронно парсимо по всьому списку сторінок:
+    tasks = [asyncio.create_task(one_page_parse(url) for url in page_list)]
+    await asyncio.gather(*tasks)
 
 
 if __name__ == "__main__":
-    main(BASE_URL)
+    asyncio.run(main())
 
     with open('authors.json', 'w', encoding='utf-8') as fd:
         json.dump(author_list, fd, ensure_ascii=False)
